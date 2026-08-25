@@ -73,3 +73,52 @@ def test_successor_reversible_zero_shadow_entropy():
         key = (s.gamma, s.k)
         assert key not in seen
         seen.add(key)
+
+
+# ── cross-validation against NINE65_v7 production semantics ──────────────
+# Mirrors crates/nine65/src/arithmetic/k_elimination.rs::adjacency_tests and
+# crates/exact_transcendentals/src/cram_anchor.rs.
+
+def test_adjacency_sign_is_minus_not_plus():
+    """Port of the pinned NINE65_v7 regression: the published anchor read
+    (gamma + K) mod A is a sign error; the winding read is gamma - K.  The
+    wrong form must MEASURABLY disagree (nonzero count, so the test can never
+    go vacuous), and the general projection (gamma + K*M) mod A must always
+    agree with ground truth."""
+    disagree = 0
+    for x in list(range(0, 3 * M_SHELL, 7)) + [RANGE - 1, RANGE // 2]:
+        r, k = x % M_SHELL, x // M_SHELL
+        wrong = (r + k) % A_ANCHOR
+        right_minus = (r - k) % A_ANCHOR
+        right_general = universal_projection(r, k, A_ANCHOR)
+        assert right_minus == x % A_ANCHOR
+        assert right_general == x % A_ANCHOR
+        if wrong != x % A_ANCHOR:
+            disagree += 1
+    assert disagree > 0, "wrong form never disagreed — test went vacuous"
+
+
+def test_adjacency_exhaustive_small_fixture():
+    """Exhaustive [3,5,7] fixture from k_elimination.rs: M'=105, A'=106,
+    every X in [0, M'*A'): derived K equals floor(X/M') and X reconstructs."""
+    mp, ap = 105, 106
+    for x in range(mp * ap):
+        k = (x % mp - x % ap) % ap
+        assert k == x // mp
+        assert x % mp + k * mp == x
+
+
+def test_boundary_probes_full_shell():
+    """Random sampling never lands on the boundaries; enumerate them
+    explicitly (k_elimination.rs:1583 pattern) on the full 30030/30031 pair."""
+    ks = [0, 1, 2, 59, 509, A_ANCHOR - 2, A_ANCHOR - 1]
+    probes = {0, 1, 2, M_SHELL - 1, M_SHELL, M_SHELL + 1,
+              A_ANCHOR - 1, A_ANCHOR, A_ANCHOR + 1, RANGE - 1}
+    probes.update(k * M_SHELL for k in ks)
+    probes.update(k * M_SHELL + (M_SHELL - 1) for k in ks[:-1])
+    for x in sorted(probes):
+        if not 0 <= x < RANGE:
+            continue
+        assert k_eliminate(x % M_SHELL, x % A_ANCHOR) == x // M_SHELL
+        s = CRAMState.from_int(x)
+        assert s.to_int() == x

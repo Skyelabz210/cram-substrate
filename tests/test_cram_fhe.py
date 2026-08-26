@@ -122,3 +122,47 @@ def test_boundary_probes_full_shell():
         assert k_eliminate(x % M_SHELL, x % A_ANCHOR) == x // M_SHELL
         s = CRAMState.from_int(x)
         assert s.to_int() == x
+
+
+# ── general star frames (arbitrary multiplier c) ─────────────────────────
+
+def test_star_frame_c1_matches_default_substrate():
+    from cram_fhe.starframe import StarFrame, SAFE_BASIS_S6
+    f = StarFrame(basis=SAFE_BASIS_S6, c=1)
+    assert (f.m, f.a, f.m_inv) == (M_SHELL, A_ANCHOR, M_INV_MOD_A)
+    for _ in range(500):
+        x = rng.randrange(RANGE)
+        assert f.k_eliminate(x % f.m, x % f.a) == k_eliminate(x % M_SHELL, x % A_ANCHOR)
+        assert f.from_int(x).to_int() == x
+
+
+def test_star_frame_arbitrary_multipliers_sound():
+    from cram_fhe.starframe import StarFrame, SAFE_BASIS_S6, SAFE_BASIS_S8
+    for basis in (SAFE_BASIS_S6, SAFE_BASIS_S8):
+        for c in (1, 2, 7, 1001, 1_048_576, 12_345_678):
+            f = StarFrame(basis=basis, c=c)
+            assert (f.m * f.m_inv) % f.a == 1          # derived, for every c
+            for x in [0, 1, f.m - 1, f.m, f.a - 1, f.a, f.range - 1] + [
+                    rng.randrange(f.range) for _ in range(300)]:
+                assert f.k_eliminate(x % f.m, x % f.a) == x // f.m
+                s = f.from_int(x)
+                assert s.to_int() == x
+                assert f.project(x % f.m, x // f.m, 39) == x % 39
+
+
+def test_star_frame_ops_match_integer_semantics():
+    from cram_fhe.starframe import StarFrame, SAFE_BASIS_S6
+    f = StarFrame(basis=SAFE_BASIS_S6, c=1001)
+    for _ in range(300):
+        x, y = rng.randrange(f.m), rng.randrange(f.m)
+        cst = rng.randrange(1, 5000)
+        assert f.from_int(x).add(f.from_int(y)).to_int() == x + y
+        assert f.from_int(x).mul_int(cst).to_int() == x * cst
+
+
+def test_multiplier_census_exact():
+    from cram_fhe.starframe import count_valid_multipliers
+    assert count_valid_multipliers(30030, 2**64 - 1) == (2**64 - 2) // 30030
+    assert count_valid_multipliers(30030, 2**64 - 1) > 14_000_000
+    assert count_valid_multipliers(9_699_690, 2**64 - 1) > 14_000_000
+    assert count_valid_multipliers(30030, 30030) == 0

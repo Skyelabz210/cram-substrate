@@ -256,6 +256,115 @@ def trace_probe() -> bool:
     return uniform
 
 
+# ───────────── 6. star-family multiplier scaling audit ───────────────────
+
+# Mirrors the multiplier sweep in NINE65_v7 params/manufactured.rs tests
+# (prime AND composite bases, prime AND composite multipliers).
+MULTIPLIER_SWEEP = [1, 2, 3, 7, 100, 1001, 99_991, 1_048_576, 12_345_678]
+
+
+def multiplier_audit() -> bool:
+    from .starframe import (
+        SAFE_BASIS_S6, SAFE_BASIS_S8, StarFrame,
+        count_valid_multipliers, count_prime_anchor_multipliers,
+    )
+    from math import gcd as _gcd
+
+    banner("6. STAR-FAMILY MULTIPLIER SCALING (A = c·M + 1, c arbitrary)")
+    rng = random.Random(20260825)
+    ok = True
+
+    # 6a. sweep: derived inverse + K-Elimination soundness + exact pairwise
+    #     coprimality (the G3 criterion, checked analytically where the
+    #     anchor is too large to enumerate) on S6 and S8.
+    for basis, label in ((SAFE_BASIS_S6, "S6"), (SAFE_BASIS_S8, "S8")):
+        bad = 0
+        for c in MULTIPLIER_SWEEP:
+            f = StarFrame(basis=basis, c=c)
+            if (f.m * f.m_inv) % f.a != 1:
+                bad += 1
+                continue
+            probes = {0, 1, f.m - 1, f.m, f.m + 1, f.a - 1, f.a, f.a + 1,
+                      f.range - 1, (f.a - 1) * f.m, (f.a // 2) * f.m + f.m - 1}
+            probes.update(rng.randrange(f.range) for _ in range(2000))
+            for x in probes:
+                if not 0 <= x < f.range:
+                    continue
+                if f.k_eliminate(x % f.m, x % f.a) != x // f.m:
+                    bad += 1
+                    break
+                if f.project(x % f.m, x // f.m, 97) != x % 97:
+                    bad += 1
+                    break
+            lanes = list(basis) + [f.a]
+            if any(_gcd(p, q) != 1 for i, p in enumerate(lanes) for q in lanes[i + 1:]):
+                bad += 1
+        print(f"  {label} sweep over c ∈ {MULTIPLIER_SWEEP}: "
+              f"{len(MULTIPLIER_SWEEP) - bad}/{len(MULTIPLIER_SWEEP)} frames sound "
+              f"(derived inverse, K-elim + projection probes, pairwise gcd=1)")
+        ok &= bad == 0
+
+    # 6b. full six-gate run on a c > 1 frame small enough to enumerate.
+    f2 = StarFrame(basis=SAFE_BASIS_S6, c=2)
+    c2 = Construct(
+        name=f"CRAM successor on star frame c=2 (A={f2.a})",
+        lanes=list(SAFE_BASIS_S6) + [f2.a],
+        step=_componentwise(lambda r, m: (r + 1) % m),
+        domain=range(4000), shell=f2.m, anchor=f2.a)
+    results = A2Suite.run(c2)
+    print(A2Suite.report(c2, results))
+    ok &= not any(r.verdict == "FAIL" for r in results)
+    print()
+
+    # 6c. exact multiplier census — no folklore numbers.
+    u64 = 2**64 - 1
+    n6 = count_valid_multipliers(30030, u64)
+    n8 = count_valid_multipliers(9_699_690, u64)
+    prime_cmax = 200_000
+    np6 = count_prime_anchor_multipliers(30030, prime_cmax)
+    print(f"  valid multipliers (CLASS-R: coprimality only, automatic for every c):")
+    print(f"    S6 (M=30030),   A within u64: {n6:,} multipliers")
+    print(f"    S8 (M=9699690), A within u64: {n8:,} multipliers")
+    print(f"  stricter predicate (anchor PRIME — not required; 30031=59·509 is")
+    print(f"    composite and legal): S6, c <= {prime_cmax:,}: {np6:,} prime anchors")
+    print(f"  the '14 million multipliers' figure has no on-disk source; under the")
+    print(f"  CLASS-R predicate it is a large UNDERstatement of the u64 census above")
+    ok &= n6 > 14_000_000 and n8 > 14_000_000
+
+    # 6d. capacity in practice: an accumulation that overflows the c=1 frame
+    #     completes in the c=2 frame, arrow-monitored with an oracle shadow.
+    def run_chain(frame: StarFrame, steps: int):
+        mon = ArrowMonitor()
+        acc, oracle = frame.from_int(0), 0
+        for _ in range(steps):
+            # draw from [25000, 30030): 40k steps then total >= 1.0e9 > the
+            # c=1 frame (9.018e8) and <= 1.2012e9 < the c=2 frame (1.8036e9),
+            # so overflow at c=1 and completion at c=2 are both guaranteed.
+            v = rng.randrange(25_000, 30_030)
+            acc2, oracle2 = acc.add(frame.from_int(v)), oracle + v
+            mon.transitions += 1
+            if acc2.k != oracle2 // frame.m:
+                mon.k_unsound += 1
+            acc, oracle = acc2, oracle2
+        return mon, acc, oracle
+
+    steps = 40_000
+    try:
+        run_chain(StarFrame(basis=SAFE_BASIS_S6, c=1), steps)
+        print("  c=1 deep chain: UNEXPECTEDLY survived — investigate")
+        ok = False
+    except OverflowError:
+        print(f"  c=1 frame: {steps:,}-step accumulation overflows the frame "
+              f"(guard trips, as documented)")
+    mon, acc, oracle = run_chain(StarFrame(basis=SAFE_BASIS_S6, c=2), steps)
+    chain_ok = mon.k_unsound == 0 and acc.to_int() == oracle
+    print(f"  c=2 frame: same {steps:,}-step chain completes; "
+          f"{mon.transitions:,} transitions, K sound throughout: "
+          f"{'yes' if chain_ok else 'NO'}")
+    ok &= chain_ok
+    return ok
+
+
 def main() -> int:
     results = {
         "substrate identities": substrate_identities(),
@@ -263,6 +372,7 @@ def main() -> int:
         "emissions harness": emissions_harness(),
         "toy-BFV battery": bfv_battery(),
         "trace uniformity": trace_probe(),
+        "multiplier scaling": multiplier_audit(),
     }
     banner("SUMMARY")
     for name, ok in results.items():

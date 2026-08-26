@@ -9,9 +9,10 @@ from .substrate import (
     k_eliminate, universal_projection, egcd, inv_mod,
 )
 from .toy_bfv import ToyBFV, Ciphertext
+from .starframe import StarFrame, FrameState, count_valid_multipliers
 
 __all__ = [
     "SAFE_BASIS", "M_SHELL", "A_ANCHOR", "CRAMState", "ArrowMonitor",
     "k_eliminate", "universal_projection", "egcd", "inv_mod",
-    "ToyBFV", "Ciphertext",
+    "ToyBFV", "Ciphertext", "StarFrame", "FrameState", "count_valid_multipliers",
 ]

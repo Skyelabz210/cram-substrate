@@ -18,7 +18,38 @@ forward from another document.
 | The only one-way step is the declared rescale; its metered cost, H_shadow = log₂(1001) ≈ 9.967 bits, **is** the noise budget spent — the entropy ledger and the noise ledger are one number | §2 (METERED), §4 |
 | Hot-path operation count is input-independent (8 component updates per op, no carry branch, because K is derived rather than carried); the explicit-K branchy variant is data-dependent (9 vs 13 ops) | §5 |
 
+## Star-family multipliers (audit §6, added 2026-08-25)
+
+| Claim | Evidence |
+|---|---|
+| For every multiplier `c ≥ 1`, `A = c·M+1` is coprime to M (Bezout identity) and the inverse `M⁻¹ = A − c` is derived, not stored — G5-clean for the whole family | §6a: 9-multiplier sweep (mirroring `manufactured.rs`, composite c included) on S6 and S8, 18/18 frames sound |
+| A c > 1 frame passes all six gates | §6b: c=2 (A=60061), A2 COMPLIANT, 2.46M states enumerated for G3 |
+| Exact multiplier census under CLASS-R (coprimality only, automatic): S6 anchors within u64: **614,277,191,931,720**; S8: **1,901,786,971,924** | §6c, `count_valid_multipliers` (exact integer division, no estimate) |
+| Raising c raises capacity linearly in practice: a 40,000-step accumulation that overflows the c=1 frame completes in the c=2 frame with K sound at every step | §6d |
+
+On the **"over 14 million mathematically valid multipliers"** figure: it has no
+on-disk source in any surveyed repo. Under the CLASS-R predicate it is *true
+but understates the u64 census by about seven orders of magnitude*; under the
+strictly-harder prime-anchor predicate (not required — 30031 = 59·509 is
+composite and legal), the exact count for S6 with c ≤ 200,000 is 48,648, and
+no extrapolated total is claimed here. Cite a predicate with the number.
+
+Capacity honesty, updated: with `A ≤ 2⁶⁴` the S6 frame reaches `M·A ≈ 2⁷⁹` —
+far past the toy 2³⁰, still below the 96–110-bit multi-anchor production
+frames in NINE65_v7. Multiplier scaling closes most of the gap; multi-lane
+anchor towers remain the production answer beyond it.
+
 ## NOT established (do not claim these)
+
+- **"ρ_CPA = 0.0000 under power analysis", claimed as *formally proven* in the
+  NINE65 v7 Formal Proofs Compendium (Manus AI, Aug 2026, Theorem 1.2) — NOT
+  established.** A Pearson correlation on physical power traces is an
+  empirical measurement on specific hardware; it cannot be the conclusion of
+  an algebraic proof, and no trace data, target device, or acquisition setup
+  accompanies the claim. The *algorithmic* half of that theorem (parallel
+  summation has no sequential secret-dependent intermediate state, unlike
+  Garner) is real and is what this repo's G2 gate checks; the physical half
+  remains subject to the side-channel scope statement below, unchanged.
 
 - **"Completely eliminates side channels" — NOT established, and not a claim
   this repo makes.** The audit gates measure *algorithmic* emissions:

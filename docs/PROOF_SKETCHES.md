@@ -177,9 +177,10 @@ discard control, L = 4 at 4 laps).
 **(b) Homogeneous schemas are the ring homomorphism (INV-2).** All-Add
 equals `(a+b) mod M`, all-Mul `(a·b) mod M`, all-Sub `(a−b) mod M`.
 *Sketch:* CRT is a ring isomorphism; identical per-lane operations are the
-image of the single global operation. Consequence recorded in CLAIM_SCOPE:
-the Operator Atlas's named-schema value table (AAAAA(100,7)=5,447)
-contradicts this and is unverified.
+image of the single global operation. Variant note (see CLAIM_SCOPE): the
+Operator Atlas's named-schema values (AAAAA(100,7)=5,447) are the earlier
+chimera-1 variant's single-integer lift, retired by the later corpus; this
+repo implements the white-paper/machine variant, where INV-2 governs.
 
 **(c) Heterogeneous schemas leave the diagonal.** A chimera generally equals
 `φ(x)` for an x that is no single homogeneous result: distinct lane

@@ -71,16 +71,27 @@ Configuration axes compose: ~6.1·10¹⁴ star multipliers (u64, S6) ×
 16,777,216 operator schemas (S8) × basis choice. "Over 14 million" is the
 operator-schema axis alone; cite each axis with its predicate.
 
-Findings against the uploaded corpus (recorded, not silently fixed):
+Variant lineage in the corpus (recorded so the generations stay straight —
+these are variants of one evolving system, not contradictions within one
+definition):
 
-- **The Operator Atlas's named-schema value table is inconsistent with the
-  formal chimera definition.** By χ_S(a,b) = φ⁻¹(F₁,…,F₅) (Chimera white
-  paper §2.3) and INV-2, AAAAA(100,7) must be 107 and MMMMM(100,7) must be
-  700; the Atlas lists 5,447 and 4,720. The audit asserts the formal
-  properties; the Atlas value column is unverified pending its evaluation
-  convention being specified.
-- The Atlas's "ALL schemas structurally safe (deg ≤ 2)" overstates: the Inv
-  operator is listed there with degree p−2; schemas containing I lanes
+- **The Operator Atlas (March 2026) is the chimera-1 variant.** It reports a
+  single-integer value for every schema, heterogeneous ones included
+  (AAAAA(100,7) = 5,447 etc.). The later corpus retired that lift: the
+  Chimera white paper (April 2026) defines χ_S = φ⁻¹(F₁,…,F_k), under which
+  homogeneous schemas equal the ring homomorphism (AAAAA = 107, per INV-2),
+  and NINE65_v7's `cram_machine.rs` goes further — a heterogeneous output
+  "names a residue tuple and nothing more" (`WindingLoss::Heterogeneous`),
+  lifting it to an integer is called **the chimera-1 trap**, and
+  single-integer reads of chimeras exist only as destructive Garner reads
+  counted by `destructive_reads()`. This repo implements the white-paper /
+  machine variant. The Atlas value column belongs to the chimera-1
+  convention, whose exact lift rule is not specified in the uploaded doc, so
+  those numbers are unverifiable here — cite them only with the variant
+  label attached.
+- Same lineage note for DKAM scope: the Atlas's "ALL schemas structurally
+  safe (deg ≤ 2)" reads Inv as a mirror; under the polynomial-degree
+  convention this repo and `cram_ops::parse_schema` use, I-lane schemas
   (15,961 of 32,768 on 5 lanes) are rational maps outside polynomial DKAM.
 - The theorem stack's own T22 ("Positive Density for All Populated Strata",
   a Dresden prime-hunt result) is not the "T22 heterogeneous case" the

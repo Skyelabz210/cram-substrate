@@ -436,9 +436,10 @@ def fifth_operator_audit() -> bool:
     print(f"  homogeneous schemas equal the ring homomorphism (INV-2): "
           f"{'yes' if hom_ok else 'NO'}; heterogeneous AAMMM is a genuine "
           f"chimera (matches no single op): {'yes' if het_ok else 'NO'}")
-    print(f"  NOTE: the Atlas named-schema value table (AAAAA(100,7)=5,447 etc.) "
-          f"contradicts the formal chimera definition and INV-2; recorded as "
-          f"unverified in docs/CLAIM_SCOPE.md")
+    print(f"  NOTE: the Atlas named-schema values (AAAAA(100,7)=5,447 etc.) are "
+          f"the chimera-1 VARIANT's single-integer lift, retired by the later "
+          f"corpus (the 'chimera-1 trap' in cram_machine.rs); this repo "
+          f"implements the white-paper/machine variant — see CLAIM_SCOPE.md")
     deg = dkam_max_degree("AAMMM")
     print(f"  DKAM: max polynomial degree of AAMMM = {deg} (< 3 = rho on the "
           f"transport core); schemas with I lanes are rational maps outside "

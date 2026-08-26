@@ -15,10 +15,12 @@ Consequences this module enforces and tests rely on:
 
   * Homogeneous schemas ARE the ring homomorphism (theorem-stack INV-2):
     χ_AAAA…(a,b) = (a+b) mod M, χ_MMMM… = (a·b) mod M, χ_SSSS… = (a−b) mod M.
-    (The Operator Atlas's named-schema value table disagrees with this on
-    its own examples — e.g. it lists AAAAA(100,7) = 5,447 where the formal
-    definition forces 107.  Per the repo's verification policy the formal
-    definition and INV-2 govern; the Atlas table values are unverified.)
+    (The Operator Atlas's named-schema values — e.g. AAAAA(100,7) = 5,447 —
+    are the earlier chimera-1 VARIANT's single-integer lift of the tuple, a
+    convention the later corpus retired as "the chimera-1 trap"
+    (cram_machine.rs).  This module implements the white-paper/machine
+    variant, where the formal definition and INV-2 govern and heterogeneous
+    outputs are residue tuples, not integers.)
   * Division/inverse lanes refuse non-units instead of corrupting them
     (the Fifth-Operator convention; E-DIV taxonomy).
   * Reconstruction for display uses parallel-summation CRT (the Lagrange

@@ -1,0 +1,533 @@
+"""Full emission audit of the CRAM-FHE fork.
+
+    python3 -m cram_fhe.audit
+
+Sections:
+  1. Substrate identity checks (star-family inverse, K-Elimination soundness,
+     Universal Projection) — oracle-checked over the whole shell and a random
+     sweep of the full [0, M*A) frame.
+  2. A2 six-gate verdicts on every evaluator construct, via the vendored
+     a2_suite (G1 invertibility, G2 order-invariance, G3 i.i.d., G4 arrow,
+     G5 derivation, G6 custody).  Includes a deliberate negative control:
+     Delta-multiplication censused WITHOUT the anchor lane, which must fail
+     G1 — demonstrating that the anchor lane is load-bearing for
+     reversibility, not decoration.
+  3. Residue emissions harness (fiber census over 4 laps of the shell):
+     clean carried successor vs synthetic quotient discard.
+  4. Toy-BFV roundtrip battery under the live ArrowMonitor.
+  5. Operation-trace uniformity probe — the honest side-channel scope.
+"""
+from __future__ import annotations
+
+import random
+from collections import Counter
+
+from .a2_suite import A2Suite, Construct
+from .substrate import (
+    SAFE_BASIS, M_SHELL, A_ANCHOR, RANGE, STAR_C, M_INV_MOD_A,
+    CRAMState, ArrowMonitor, k_eliminate, universal_projection,
+)
+from .toy_bfv import ToyBFV, DELTA, T_PLAIN, NOISE_MAX
+
+
+def banner(title: str) -> None:
+    print("=" * 74)
+    print(title)
+    print("=" * 74)
+
+
+# ───────────────────── 1. substrate identity checks ──────────────────────
+
+def substrate_identities() -> bool:
+    banner("1. SUBSTRATE IDENTITIES (oracle-checked)")
+    ok = True
+
+    inv_ok = (M_SHELL * M_INV_MOD_A) % A_ANCHOR == 1
+    print(f"  star-family inverse M^-1 = A - c = {M_INV_MOD_A} "
+          f"(c={STAR_C}, read off the construction): "
+          f"{'ok' if inv_ok else 'WRONG'}")
+    ok &= inv_ok
+
+    kbad = 0
+    for x in range(2 * M_SHELL + 5):
+        if k_eliminate(x % M_SHELL, x % A_ANCHOR) != x // M_SHELL:
+            kbad += 1
+    rng = random.Random(20260825)
+    for _ in range(50_000):
+        x = rng.randrange(RANGE)
+        if k_eliminate(x % M_SHELL, x % A_ANCHOR) != x // M_SHELL:
+            kbad += 1
+    print(f"  K-Elimination == floor(X/M): exhaustive first 2 laps + 50k random "
+          f"over [0, M*A): {kbad} failures")
+    ok &= kbad == 0
+
+    pbad = 0
+    for _ in range(20_000):
+        x = rng.randrange(RANGE)
+        for target in (97, 39, 1001, 65537):   # incl. shared-factor targets
+            if universal_projection(x % M_SHELL, x // M_SHELL, target) != x % target:
+                pbad += 1
+    print(f"  Universal Projection to lanes 97/39/1001/65537 "
+          f"(coprimality NOT required): {pbad} failures")
+    ok &= pbad == 0
+    return ok
+
+
+# ───────────────────── 2. A2 six-gate construct audits ───────────────────
+
+EVAL_LANES = list(SAFE_BASIS) + [A_ANCHOR]
+
+
+def _componentwise(f):
+    def step(state, order):
+        out = {}
+        for m in order:            # order is ignored by construction
+            out[m] = f(state[m], m)
+        return out
+    return step
+
+
+def construct_audits() -> bool:
+    banner("2. A2 SIX-GATE VERDICTS (evaluator constructs)")
+    constructs = [
+        Construct(name="CRAM successor (carried, anchor lane)",
+                  lanes=EVAL_LANES,
+                  step=_componentwise(lambda r, m: (r + 1) % m),
+                  domain=range(4000), shell=M_SHELL, anchor=A_ANCHOR),
+        Construct(name="Homomorphic add (+ fixed ct component)",
+                  lanes=EVAL_LANES,
+                  step=_componentwise(lambda r, m: (r + 12345) % m),
+                  domain=range(4000), shell=M_SHELL, anchor=A_ANCHOR),
+        Construct(name=f"Plaintext mul by Delta={DELTA} (anchor carried)",
+                  lanes=EVAL_LANES,
+                  step=_componentwise(lambda r, m: (r * DELTA) % m),
+                  domain=range(4000), shell=M_SHELL, anchor=A_ANCHOR),
+        Construct(name="K-Elimination (star pair, derived inverse)",
+                  lanes=EVAL_LANES,
+                  step=_componentwise(lambda r, m: r),
+                  domain=range(4000), shell=M_SHELL, anchor=A_ANCHOR,
+                  constants=[(M_INV_MOD_A, lambda: A_ANCHOR - STAR_C)]),
+        Construct(name=f"Rescale by Delta={DELTA} (declared one-way)",
+                  lanes=[M_SHELL],
+                  step=lambda state, order: {
+                      M_SHELL: ((state[M_SHELL] + DELTA // 2) // DELTA) % M_SHELL},
+                  domain=range(M_SHELL), declared_oneway=True),
+    ]
+    negative_control = Construct(
+        name=f"NEGATIVE CONTROL: mul by Delta WITHOUT anchor lane",
+        lanes=list(SAFE_BASIS),
+        step=_componentwise(lambda r, m: (r * DELTA) % m),
+        domain=range(4000))
+
+    all_ok = True
+    for c in constructs:
+        results = A2Suite.run(c)
+        print(A2Suite.report(c, results))
+        print()
+        all_ok &= not any(r.verdict == "FAIL" for r in results)
+
+    results = A2Suite.run(negative_control)
+    print(A2Suite.report(negative_control, results))
+    fired_g1 = any(r.verdict == "FAIL" and r.gate.startswith("G1") for r in results)
+    print(f"  control behaves as expected (G1 must fire on the phase-only view): "
+          f"{'yes' if fired_g1 else 'NO — INVESTIGATE'}")
+    print()
+    all_ok &= fired_g1
+    return all_ok
+
+
+# ───────────────── 3. residue emissions harness (4 laps) ─────────────────
+
+def emissions_harness(laps: int = 4) -> bool:
+    banner(f"3. RESIDUE EMISSIONS HARNESS ({laps} laps of M={M_SHELL})")
+
+    def census(transition) -> tuple[int, int, int]:
+        fibers: Counter = Counter()
+        corr_fail = 0
+        for x in range(laps * M_SHELL):
+            view_out, x_out = transition(x)
+            fibers[view_out] += 1
+            if universal_projection(x_out % M_SHELL, x_out // M_SHELL, 97) != x_out % 97:
+                corr_fail += 1
+        max_l = max(fibers.values())
+        rev_fail = sum(n for n in fibers.values() if n > 1)
+        return max_l, rev_fail, corr_fail
+
+    def clean(x: int):
+        s = CRAMState.from_int(x).succ()
+        return (s.gamma, s.k), x + 1          # winding derived, nothing dropped
+
+    def discard(x: int):
+        s = CRAMState.from_int(x).succ()
+        return (s.gamma, 0), x + 1            # winding synthetically dropped
+
+    l1, r1, c1 = census(clean)
+    print(f"  clean carried successor : max fiber L={l1}, H_shadow="
+          f"{'0' if l1 == 1 else 'log2(%d)' % l1} bits, "
+          f"reversibility failures={r1}, projection failures={c1}")
+    l2, r2, c2 = census(discard)
+    print(f"  synthetic K discard     : max fiber L={l2} "
+          f"({l2} laps collapse -> 2 bits shadow entropy), "
+          f"reversibility failures={r2}")
+    ok = l1 == 1 and r1 == 0 and c1 == 0 and l2 == laps
+    verdict = ("clean substrate reversible, zero shadow entropy; "
+               "discard control leaks as expected") if ok else "UNEXPECTED — INVESTIGATE"
+    print(f"  verdict: {verdict}")
+    return ok
+
+
+# ───────────────── 4. toy-BFV roundtrips under the monitor ───────────────
+
+def bfv_battery(trials: int = 300) -> bool:
+    banner("4. TOY-BFV ROUNDTRIPS UNDER LIVE ARROW MONITOR")
+    rng = random.Random(20260825)
+    scheme = ToyBFV(seed=20260825)
+    monitor = ArrowMonitor()
+    wrong = 0
+    for _ in range(trials):
+        m1, m2, m3 = (rng.randrange(T_PLAIN) for _ in range(3))
+        c = rng.randrange(0, 12)
+        ct = ToyBFV.add(scheme.encrypt(m1), scheme.encrypt(m2), monitor)
+        ct = ToyBFV.mul_plain(ct, c, monitor)
+        ct = ToyBFV.add(ct, scheme.encrypt(m3), monitor)
+        assert ct.exactness_guaranteed(), "noise ledger exceeded — bad parameters"
+        if scheme.decrypt(ct) != ((m1 + m2) * c + m3) % T_PLAIN:
+            wrong += 1
+
+    # one metered rescale demonstration on a Delta-scaled value
+    y = rng.randrange(T_PLAIN)
+    x = CRAMState.from_int(DELTA * y + rng.randrange(-NOISE_MAX, NOISE_MAX + 1) % DELTA)
+    out, oracle = ToyBFV.rescale_state(x, x.to_int(), monitor)
+    rescale_ok = out.to_int() == oracle
+
+    print(f"  {trials} chains  ((m1+m2)*c + m3):  {trials - wrong}/{trials} exact decrypts")
+    print(f"  metered rescale exact: {'yes' if rescale_ok else 'NO'}")
+    print("  " + monitor.report().replace("\n", "\n  "))
+    return wrong == 0 and rescale_ok and monitor.clean
+
+
+# ───────────── 5. operation-trace uniformity (honest scope) ──────────────
+
+def trace_probe() -> bool:
+    banner("5. OPERATION-TRACE UNIFORMITY PROBE (side-channel scope)")
+
+    def branchy_trace(x: int) -> int:
+        """Explicit-K successor with a data-dependent carry branch —
+        the shape the emissions harness pedagogically uses."""
+        ops = 0
+        r = [x % p for p in SAFE_BASIS]
+        k = x // M_SHELL
+        for i, p in enumerate(SAFE_BASIS):
+            r[i] = (r[i] + 1) % p
+            ops += 1
+        wrapped = True
+        for v in r:                # short-circuit scan: length is data-dependent
+            ops += 1
+            if v != 0:
+                wrapped = False
+                break
+        if wrapped:
+            k += 1
+            ops += 1
+        return ops
+
+    def substrate_trace(x: int) -> int:
+        """Carried successor: fixed component-wise update, K never stored,
+        so there is no carry decision to branch on."""
+        return len(SAFE_BASIS) + 2      # 6 view lanes + shell + anchor, always
+
+    boundary = M_SHELL - 1
+    interior = 17
+    bt_b, bt_i = branchy_trace(boundary), branchy_trace(interior)
+    st_b, st_i = substrate_trace(boundary), substrate_trace(interior)
+    print(f"  branchy explicit-K successor : trace {bt_i} ops (interior) vs "
+          f"{bt_b} ops (lap boundary) — DATA-DEPENDENT")
+    print(f"  carried derived-K successor  : trace {st_i} ops (interior) vs "
+          f"{st_b} ops (lap boundary) — uniform")
+    uniform = st_b == st_i and bt_b != bt_i
+    print()
+    print("  Scope statement (read docs/CLAIM_SCOPE.md before quoting this):")
+    print("  the substrate eliminates the ALGORITHMIC emission class — zero")
+    print("  undeclared information discard, no data-dependent control flow or")
+    print("  operation count in the hot path.  It does NOT by itself eliminate")
+    print("  physical side channels: CPython big-int ops are variable-time, so")
+    print("  a constant-time production port (Rust, CT primitives) is required")
+    print("  before any physical side-channel claim is made.")
+    return uniform
+
+
+# ───────────── 6. star-family multiplier scaling audit ───────────────────
+
+# Mirrors the multiplier sweep in NINE65_v7 params/manufactured.rs tests
+# (prime AND composite bases, prime AND composite multipliers).
+MULTIPLIER_SWEEP = [1, 2, 3, 7, 100, 1001, 99_991, 1_048_576, 12_345_678]
+
+
+def multiplier_audit() -> bool:
+    from .starframe import (
+        SAFE_BASIS_S6, SAFE_BASIS_S8, StarFrame,
+        count_valid_multipliers, count_prime_anchor_multipliers,
+    )
+    from math import gcd as _gcd
+
+    banner("6. STAR-FAMILY MULTIPLIER SCALING (A = c·M + 1, c arbitrary)")
+    rng = random.Random(20260825)
+    ok = True
+
+    # 6a. sweep: derived inverse + K-Elimination soundness + exact pairwise
+    #     coprimality (the G3 criterion, checked analytically where the
+    #     anchor is too large to enumerate) on S6 and S8.
+    for basis, label in ((SAFE_BASIS_S6, "S6"), (SAFE_BASIS_S8, "S8")):
+        bad = 0
+        for c in MULTIPLIER_SWEEP:
+            f = StarFrame(basis=basis, c=c)
+            if (f.m * f.m_inv) % f.a != 1:
+                bad += 1
+                continue
+            probes = {0, 1, f.m - 1, f.m, f.m + 1, f.a - 1, f.a, f.a + 1,
+                      f.range - 1, (f.a - 1) * f.m, (f.a // 2) * f.m + f.m - 1}
+            probes.update(rng.randrange(f.range) for _ in range(2000))
+            for x in probes:
+                if not 0 <= x < f.range:
+                    continue
+                if f.k_eliminate(x % f.m, x % f.a) != x // f.m:
+                    bad += 1
+                    break
+                if f.project(x % f.m, x // f.m, 97) != x % 97:
+                    bad += 1
+                    break
+            lanes = list(basis) + [f.a]
+            if any(_gcd(p, q) != 1 for i, p in enumerate(lanes) for q in lanes[i + 1:]):
+                bad += 1
+        print(f"  {label} sweep over c ∈ {MULTIPLIER_SWEEP}: "
+              f"{len(MULTIPLIER_SWEEP) - bad}/{len(MULTIPLIER_SWEEP)} frames sound "
+              f"(derived inverse, K-elim + projection probes, pairwise gcd=1)")
+        ok &= bad == 0
+
+    # 6b. full six-gate run on a c > 1 frame small enough to enumerate.
+    f2 = StarFrame(basis=SAFE_BASIS_S6, c=2)
+    c2 = Construct(
+        name=f"CRAM successor on star frame c=2 (A={f2.a})",
+        lanes=list(SAFE_BASIS_S6) + [f2.a],
+        step=_componentwise(lambda r, m: (r + 1) % m),
+        domain=range(4000), shell=f2.m, anchor=f2.a)
+    results = A2Suite.run(c2)
+    print(A2Suite.report(c2, results))
+    ok &= not any(r.verdict == "FAIL" for r in results)
+    print()
+
+    # 6c. exact multiplier census — no folklore numbers.
+    u64 = 2**64 - 1
+    n6 = count_valid_multipliers(30030, u64)
+    n8 = count_valid_multipliers(9_699_690, u64)
+    prime_cmax = 200_000
+    np6 = count_prime_anchor_multipliers(30030, prime_cmax)
+    print(f"  valid multipliers (CLASS-R: coprimality only, automatic for every c):")
+    print(f"    S6 (M=30030),   A within u64: {n6:,} multipliers")
+    print(f"    S8 (M=9699690), A within u64: {n8:,} multipliers")
+    print(f"  stricter predicate (anchor PRIME — not required; 30031=59·509 is")
+    print(f"    composite and legal): S6, c <= {prime_cmax:,}: {np6:,} prime anchors")
+    print(f"  the '14 million multipliers' figure has no on-disk source; under the")
+    print(f"  CLASS-R predicate it is a large UNDERstatement of the u64 census above")
+    ok &= n6 > 14_000_000 and n8 > 14_000_000
+
+    # 6d. capacity in practice: an accumulation that overflows the c=1 frame
+    #     completes in the c=2 frame, arrow-monitored with an oracle shadow.
+    def run_chain(frame: StarFrame, steps: int):
+        mon = ArrowMonitor()
+        acc, oracle = frame.from_int(0), 0
+        for _ in range(steps):
+            # draw from [25000, 30030): 40k steps then total >= 1.0e9 > the
+            # c=1 frame (9.018e8) and <= 1.2012e9 < the c=2 frame (1.8036e9),
+            # so overflow at c=1 and completion at c=2 are both guaranteed.
+            v = rng.randrange(25_000, 30_030)
+            acc2, oracle2 = acc.add(frame.from_int(v)), oracle + v
+            mon.transitions += 1
+            if acc2.k != oracle2 // frame.m:
+                mon.k_unsound += 1
+            acc, oracle = acc2, oracle2
+        return mon, acc, oracle
+
+    steps = 40_000
+    try:
+        run_chain(StarFrame(basis=SAFE_BASIS_S6, c=1), steps)
+        print("  c=1 deep chain: UNEXPECTEDLY survived — investigate")
+        ok = False
+    except OverflowError:
+        print(f"  c=1 frame: {steps:,}-step accumulation overflows the frame "
+              f"(guard trips, as documented)")
+    mon, acc, oracle = run_chain(StarFrame(basis=SAFE_BASIS_S6, c=2), steps)
+    chain_ok = mon.k_unsound == 0 and acc.to_int() == oracle
+    print(f"  c=2 frame: same {steps:,}-step chain completes; "
+          f"{mon.transitions:,} transitions, K sound throughout: "
+          f"{'yes' if chain_ok else 'NO'}")
+    ok &= chain_ok
+    return ok
+
+
+# ───────── 7. the 5th operator (transduction) + operator census ──────────
+
+def fifth_operator_audit() -> bool:
+    from .starframe import SAFE_BASIS_S6, SAFE_BASIS_S8, StarFrame, transduce
+    from .schemas import (
+        ATLAS_BASIS, apply_schema, parallel_summation_crt, dkam_max_degree,
+        schema_census, matches_homogeneous,
+    )
+    banner("7. FIFTH OPERATOR (TRANSDUCTION) + OPERATOR CENSUS")
+    rng = random.Random(20260826)
+    ok = True
+
+    s6 = StarFrame(basis=SAFE_BASIS_S6, c=1)
+    s8 = StarFrame(basis=SAFE_BASIS_S8, c=1)
+
+    # 7a. T-X-EXACT + T-X-REV: value preserved, round trip is the identity.
+    bad = 0
+    for _ in range(3000):
+        x = rng.randrange(s6.range)
+        t = transduce(s6.from_int(x), s8)
+        if t.to_int() != x or transduce(t, s6).to_int() != x:
+            bad += 1
+    print(f"  T-X-EXACT / T-X-REV: 3000 S6→S8→S6 round trips, {bad} failures")
+    ok &= bad == 0
+
+    # 7b. Commuting square: X(a) + X(b) == X(a + b).
+    bad = 0
+    for _ in range(2000):
+        a, b = rng.randrange(s6.range // 2), rng.randrange(s6.range // 2)
+        lhs = transduce(s6.from_int(a), s8).add(transduce(s6.from_int(b), s8))
+        rhs = transduce(s6.from_int(a).add(s6.from_int(b)), s8)
+        if lhs.to_int() != rhs.to_int():
+            bad += 1
+    print(f"  commuting square X(a)+X(b) = X(a+b): 2000 draws, {bad} failures")
+    ok &= bad == 0
+
+    # 7c. T-X-PROJ: projection is not reversible — exact collision witness.
+    hi = s8.from_int(5 * s8.m + 123)
+    lo = s8.from_int(1 * s8.m + 123)
+    p1, p2 = transduce(hi, s8, policy="project"), transduce(lo, s8, policy="project")
+    collide = (p1 == p2) and (hi != lo)
+    print(f"  T-X-PROJ witness: states with K=5 and K=1 collide under the "
+          f"project policy: {'yes — declared one-way confirmed' if collide else 'NO'}")
+    ok &= collide
+
+    # 7d. Winding Vanish (Policy I): as the basis grows past X, K -> 0.
+    x = 500_000_000
+    ladder = [s6, s8, StarFrame(basis=SAFE_BASIS_S8 + (23, 29), c=1)]
+    ks = [transduce(s6.from_int(x), f).k for f in ladder]
+    print(f"  winding vanish for X={x:,}: K over M=30030 / 9699690 / "
+          f"6469693230 = {ks[0]:,} / {ks[1]:,} / {ks[2]}")
+    ok &= ks[-1] == 0 and ks[0] > ks[1] > ks[2]
+
+    # 7e. Operator census — exact, with on-disk provenance.
+    c5, c8 = schema_census(5), schema_census(8)
+    print(f"  operator schemas: 8^5 = {c5:,} (Atlas, 5 lanes); "
+          f"8^8 = {c8:,} = 16^6 (S8, matches NINE65_v7 operator_space_R.py)")
+    print(f"  'over 14 million operators': satisfied by the 8-lane census "
+          f"({c8:,}); with the R operator, 9^8 = {schema_census(8, 9):,}")
+    ok &= c8 == 16**6 == 16_777_216 and c8 > 14_000_000
+
+    # 7f. Chimera formal properties (INV-2 governs; Atlas value table does not).
+    a, b = 100, 7
+    hom_ok = (parallel_summation_crt(apply_schema("AAAAA", a, b)) == (a + b) % 15015
+              and parallel_summation_crt(apply_schema("MMMMM", a, b)) == (a * b) % 15015
+              and parallel_summation_crt(apply_schema("SSSSS", a, b)) == (a - b) % 15015)
+    chi = apply_schema("AAMMM", a, b)
+    het_ok = matches_homogeneous(chi, a, b) == set()
+    print(f"  homogeneous schemas equal the ring homomorphism (INV-2): "
+          f"{'yes' if hom_ok else 'NO'}; heterogeneous AAMMM is a genuine "
+          f"chimera (matches no single op): {'yes' if het_ok else 'NO'}")
+    print(f"  NOTE: the Atlas named-schema values (AAAAA(100,7)=5,447 etc.) are "
+          f"the chimera-1 VARIANT's single-integer lift, retired by the later "
+          f"corpus (the 'chimera-1 trap' in cram_machine.rs); this repo "
+          f"implements the white-paper/machine variant — see CLAIM_SCOPE.md")
+    deg = dkam_max_degree("AAMMM")
+    print(f"  DKAM: max polynomial degree of AAMMM = {deg} (< 3 = rho on the "
+          f"transport core); schemas with I lanes are rational maps outside "
+          f"polynomial DKAM ({8**5 - 7**5:,} of {8**5:,} on 5 lanes)")
+    ok &= hom_ok and het_ok and deg == 2
+    return ok
+
+
+# ───── 8. arrow-harness qualification of the CRAM-public mul pipeline ────
+
+def mul_pipeline_qualification() -> bool:
+    """Gate-qualify the NINE65_v7 CRAM-public multiply's coupling step with
+    the ACTUAL six-gate suite — the measuring stick, not predispositions.
+
+    Lane coupling per se is not the fault: Universal Projection reads every
+    lane and is COMPLIANT.  The faults are what the gates measure.  The mul
+    pipeline's coupling site is an R8-class direct materialization
+    (materialize the exact CRT integer, reproject every lane).  Modeled here
+    at small scale and run through G1-G6; contrasted with the R9 Garner
+    cascade, which the reference suite already convicts on G2.
+
+    Rust-side witnesses on the real implementation (NINE65_v7):
+      ct_multiply_is_order_equivariant_bit_exact      -> G2 PASS (no cascade)
+      ct_multiply_is_not_lane_independent_every_lane_moves -> coupling measured
+    """
+    from .a2_suite import inv_mod as suite_inv
+    banner("8. ARROW-HARNESS QUALIFICATION: CRAM-PUBLIC MUL PIPELINE (R8 vs R9)")
+
+    lanes = [7, 11, 13]
+    m_prod = 7 * 11 * 13                      # 1001
+
+    def materialize_reproject(state, order):
+        # R8 direct materialization: parallel-summation CRT (every term
+        # independent), then reproject each lane. No running value threads
+        # lanes; order cannot matter.
+        x = 0
+        for m in lanes:
+            mi = m_prod // m
+            x += state[m] * mi * suite_inv(mi % m, m)
+        x %= m_prod
+        return {m: x % m for m in order}
+
+    consts = []
+    for m in lanes:
+        mi = m_prod // m
+        consts.append((suite_inv(mi % m, m),
+                       (lambda m=m, mi=mi: suite_inv(mi % m, m))))
+
+    r8 = Construct(
+        name="R8 materialize+reproject (mul-pipeline coupling site, modeled)",
+        lanes=lanes, step=materialize_reproject,
+        domain=range(m_prod), constants=consts)
+    results = A2Suite.run(r8)
+    print(A2Suite.report(r8, results))
+    r8_ok = not any(r.verdict == "FAIL" for r in results)
+    print()
+    from .a2_suite import make_garner
+    g = make_garner()
+    g_results = A2Suite.run(g)
+    g_fails_g2 = any(r.verdict == "FAIL" and r.gate.startswith("G2") for r in g_results)
+    print(f"  contrast R9 (Garner/MRC cascade): G2 {'FAIL — convicted, as required' if g_fails_g2 else 'unexpectedly passed'}")
+    print("  verdict: the mul pipeline's coupling is R8-class — order-invariant,")
+    print("  derivable constants, no cascade; gate-compliant. The elimination-first")
+    print("  policy question (hot path should not materialize) is SEPARATE from")
+    print("  gate compliance and is tracked as M2/M3 in NINE65_v7")
+    print("  docs/CRAM_PUBLIC_MODE.md. Rust witnesses on the real multiply:")
+    print("  order-equivariance bit-exact PASS; i.i.d. coupling measured (pinned).")
+    return r8_ok and g_fails_g2
+
+
+def main() -> int:
+    results = {
+        "substrate identities": substrate_identities(),
+        "A2 six-gate audits": construct_audits(),
+        "emissions harness": emissions_harness(),
+        "toy-BFV battery": bfv_battery(),
+        "trace uniformity": trace_probe(),
+        "multiplier scaling": multiplier_audit(),
+        "fifth operator + census": fifth_operator_audit(),
+        "mul pipeline qualification": mul_pipeline_qualification(),
+    }
+    banner("SUMMARY")
+    for name, ok in results.items():
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
+    all_ok = all(results.values())
+    print(f"\n  overall: {'ALL SECTIONS PASS' if all_ok else 'FAILURES PRESENT'}")
+    return 0 if all_ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

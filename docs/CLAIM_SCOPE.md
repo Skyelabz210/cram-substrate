@@ -1,8 +1,26 @@
 # CRAM-FHE Reversible-Residue Fork — Claim Surface and Limits
 
-Date: 2026-08-25. Every number below is sourced to a section of
-`python3 -m cram_fhe.audit` run against this commit. Nothing here is carried
-forward from another document.
+Date: 2026-08-25 (updated 2026-08-26). Every number below is sourced to a
+section of `python3 -m cram_fhe.audit` run against this commit. Nothing here
+is carried forward from another document.
+
+## Verification policy (governing rule, set by the project owner 2026-08-26)
+
+**A theorem is PROVED only if a machine-checked artifact exists on disk —
+a Lean file that `lake build` elaborates or a Coq file that `coqc` compiled.
+Everything else is a PROOF SKETCH, regardless of any "[PROVED]",
+"Lean verified", or "0 sorry" label in a document.** Documents produced by
+generation tooling have carried such labels for statements with no
+corresponding formalization; the label is not the artifact.
+
+Under this policy, the machine-checked set today is: Universal Projection and
+K-Elimination soundness (`k-elimination-lean4`, sorry/axiom-free, with
+compiled Coq `.vo`), plus NINE65_v7's `lean4/KElimination` (19 modules, one
+documented axiom `ahop_hardness`). Everything else across the uploaded
+compendia — the four pillars, the 10-theorem table beyond those two, the
+theorem stack's [PROVED] rows, T-ODC, and the transduction theorems
+T-X-WD / T-X-EXACT / T-X-SIG / T-X-REV / T-X-PROJ — is proof sketch, in
+several cases with strong empirical witnesses in this repo's audit.
 
 ## Established (measured by the audit in this repo)
 
@@ -38,6 +56,41 @@ Capacity honesty, updated: with `A ≤ 2⁶⁴` the S6 frame reaches `M·A ≈ 2
 far past the toy 2³⁰, still below the 96–110-bit multi-anchor production
 frames in NINE65_v7. Multiplier scaling closes most of the gap; multi-lane
 anchor towers remain the production answer beyond it.
+
+## Operator census and the 5th operator (audit §7, added 2026-08-26)
+
+| Claim | Evidence |
+|---|---|
+| Operator-schema census, exact: 8⁵ = 32,768 (Atlas 5-lane basis); **8⁸ = 16⁶ = 16,777,216** (8-lane S8 — the "over 14 million operators" referent, with on-disk provenance `NINE65_v7/docs/cram-corpus/2026-08-12/operator_space_R.py:489`); 9⁸ = 43,046,721 with the R operator | §7e |
+| Transduction (5th operator) implemented: T-X-EXACT and T-X-REV witnessed over 3,000 S6→S8→S6 round trips, 0 failures; commuting square X(a)+X(b)=X(a+b) over 2,000 draws, 0 failures | §7a–b |
+| Projection winding policy is not reversible — exact collision witness (states with K=5 and K=1 collapse), consistent with T-X-PROJ and gate G1 | §7c |
+| Winding Vanish (Policy I): K for X=5·10⁸ falls 16,650 → 51 → 0 as the basis grows S6 → S8 → S8∪{23,29} | §7d |
+| Homogeneous schemas equal the ring homomorphism (INV-2); heterogeneous AAMMM matches no single homogeneous op (genuine chimera); polynomial DKAM degree 2 < 3 on the transport core | §7f |
+
+Configuration axes compose: ~6.1·10¹⁴ star multipliers (u64, S6) ×
+16,777,216 operator schemas (S8) × basis choice. "Over 14 million" is the
+operator-schema axis alone; cite each axis with its predicate.
+
+Findings against the uploaded corpus (recorded, not silently fixed):
+
+- **The Operator Atlas's named-schema value table is inconsistent with the
+  formal chimera definition.** By χ_S(a,b) = φ⁻¹(F₁,…,F₅) (Chimera white
+  paper §2.3) and INV-2, AAAAA(100,7) must be 107 and MMMMM(100,7) must be
+  700; the Atlas lists 5,447 and 4,720. The audit asserts the formal
+  properties; the Atlas value column is unverified pending its evaluation
+  convention being specified.
+- The Atlas's "ALL schemas structurally safe (deg ≤ 2)" overstates: the Inv
+  operator is listed there with degree p−2; schemas containing I lanes
+  (15,961 of 32,768 on 5 lanes) are rational maps outside polynomial DKAM.
+- The theorem stack's own T22 ("Positive Density for All Populated Strata",
+  a Dresden prime-hunt result) is not the "T22 heterogeneous case" the
+  safe-basis compendium cites as the U11 transduction witness; that witness
+  remains unlocated. The transduction empirical witness with provenance is
+  now this repo's audit §7.
+- Transduction here reads values via the linear (r_M, K) identity and
+  reconstructs chimera displays via parallel-summation CRT (compendium
+  Theorem 1.1) — no Garner/MRC anywhere, honoring POA-7 where the 5th
+  Operator document's Definition 1.2 still names Garner for γ_B.
 
 ## NOT established (do not claim these)
 

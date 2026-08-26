@@ -166,3 +166,54 @@ def test_multiplier_census_exact():
     assert count_valid_multipliers(30030, 2**64 - 1) > 14_000_000
     assert count_valid_multipliers(9_699_690, 2**64 - 1) > 14_000_000
     assert count_valid_multipliers(30030, 30030) == 0
+
+
+# ── the 5th operator (transduction) and operator schemas ─────────────────
+
+def test_transduction_exact_and_reversible():
+    from cram_fhe.starframe import StarFrame, SAFE_BASIS_S6, SAFE_BASIS_S8, transduce
+    s6, s8 = StarFrame(SAFE_BASIS_S6, 1), StarFrame(SAFE_BASIS_S8, 1)
+    for _ in range(400):
+        x = rng.randrange(s6.range)
+        t = transduce(s6.from_int(x), s8)
+        assert t.to_int() == x                      # T-X-EXACT
+        assert transduce(t, s6).to_int() == x       # T-X-REV
+
+
+def test_transduction_commuting_square():
+    from cram_fhe.starframe import StarFrame, SAFE_BASIS_S6, SAFE_BASIS_S8, transduce
+    s6, s8 = StarFrame(SAFE_BASIS_S6, 1), StarFrame(SAFE_BASIS_S8, 1)
+    for _ in range(200):
+        a, b = rng.randrange(s6.range // 2), rng.randrange(s6.range // 2)
+        lhs = transduce(s6.from_int(a), s8).add(transduce(s6.from_int(b), s8))
+        rhs = transduce(s6.from_int(a).add(s6.from_int(b)), s8)
+        assert lhs.to_int() == rhs.to_int()
+
+
+def test_projection_policy_not_reversible():
+    from cram_fhe.starframe import StarFrame, SAFE_BASIS_S8, transduce
+    s8 = StarFrame(SAFE_BASIS_S8, 1)
+    hi, lo = s8.from_int(5 * s8.m + 9), s8.from_int(9)
+    assert transduce(hi, s8, policy="project") == transduce(lo, s8, policy="project")
+    assert hi != lo                                  # T-X-PROJ collision witness
+
+
+def test_schema_census_identity():
+    from cram_fhe.schemas import schema_census
+    assert schema_census(5) == 32_768
+    assert schema_census(8) == 16**6 == 16_777_216 > 14_000_000
+    assert schema_census(8, 9) == 43_046_721
+
+
+def test_chimera_formal_properties():
+    from cram_fhe.schemas import (
+        apply_schema, parallel_summation_crt, matches_homogeneous, dkam_max_degree)
+    for _ in range(100):
+        a, b = rng.randrange(15015), rng.randrange(1, 15015)
+        # INV-2: homogeneous schemas ARE the ring homomorphism
+        assert parallel_summation_crt(apply_schema("AAAAA", a, b)) == (a + b) % 15015
+        assert parallel_summation_crt(apply_schema("MMMMM", a, b)) == (a * b) % 15015
+        assert parallel_summation_crt(apply_schema("SSSSS", a, b)) == (a - b) % 15015
+    assert matches_homogeneous(apply_schema("AAMMM", 100, 7), 100, 7) == set()
+    assert dkam_max_degree("AAMMM") == 2
+    assert dkam_max_degree("AAIMM") is None          # inverse lane: rational map

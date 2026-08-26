@@ -200,3 +200,36 @@ def count_prime_anchor_multipliers(m: int, c_max: int) -> int:
     a strictly harder validity predicate than CLASS-R requires (composite
     anchors are legal; 30031 = 59·509 itself is composite)."""
     return sum(1 for c in range(1, c_max + 1) if _is_probable_prime(c * m + 1))
+
+
+# ── the 5th operator: Transduction ───────────────────────────────────────
+
+def transduce(state: FrameState, target: StarFrame, policy: str = "recompute") -> FrameState:
+    """Exact transition between star frames (the 5th CRAM operator).
+
+    Winding policies (per the transduction formalization):
+      "recompute" — the target winding is recomputed canonically from the
+        exact value: X_A -> enc_B(val_A(state)).  Reversible whenever the
+        value also fits the source frame (T-X-REV: round trip is the identity
+        up to canonicalization).  T-X-EXACT holds by construction:
+        val_B(transduce(s)) == val_A(s).
+      "project" — the winding is DISCARDED: only X mod M_B survives.  This is
+        a declared projection, NOT a reversible transduction (T-X-PROJ): two
+        source states differing only in winding collapse to one output.  Use
+        it only where winding is proven irrelevant; meter it like any other
+        declared one-way step.
+
+    The value read val_A = r_M + K·M is a linear combination of two lane
+    reads (K-Elimination + the reconstruction identity), not a Garner
+    cascade — no mixed-radix digits anywhere on this path.
+    """
+    x = state.to_int()
+    if policy == "recompute":
+        if x >= target.range:
+            raise OverflowError(
+                f"target frame too small for exact transduction: value {x} >= "
+                f"M_B*A_B = {target.range} (E-X2); raise the target multiplier")
+        return target.from_int(x)
+    if policy == "project":
+        return target.from_int(x % target.m)
+    raise ValueError(f"unknown winding policy {policy!r}")

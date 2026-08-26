@@ -365,6 +365,88 @@ def multiplier_audit() -> bool:
     return ok
 
 
+# ───────── 7. the 5th operator (transduction) + operator census ──────────
+
+def fifth_operator_audit() -> bool:
+    from .starframe import SAFE_BASIS_S6, SAFE_BASIS_S8, StarFrame, transduce
+    from .schemas import (
+        ATLAS_BASIS, apply_schema, parallel_summation_crt, dkam_max_degree,
+        schema_census, matches_homogeneous,
+    )
+    banner("7. FIFTH OPERATOR (TRANSDUCTION) + OPERATOR CENSUS")
+    rng = random.Random(20260826)
+    ok = True
+
+    s6 = StarFrame(basis=SAFE_BASIS_S6, c=1)
+    s8 = StarFrame(basis=SAFE_BASIS_S8, c=1)
+
+    # 7a. T-X-EXACT + T-X-REV: value preserved, round trip is the identity.
+    bad = 0
+    for _ in range(3000):
+        x = rng.randrange(s6.range)
+        t = transduce(s6.from_int(x), s8)
+        if t.to_int() != x or transduce(t, s6).to_int() != x:
+            bad += 1
+    print(f"  T-X-EXACT / T-X-REV: 3000 S6→S8→S6 round trips, {bad} failures")
+    ok &= bad == 0
+
+    # 7b. Commuting square: X(a) + X(b) == X(a + b).
+    bad = 0
+    for _ in range(2000):
+        a, b = rng.randrange(s6.range // 2), rng.randrange(s6.range // 2)
+        lhs = transduce(s6.from_int(a), s8).add(transduce(s6.from_int(b), s8))
+        rhs = transduce(s6.from_int(a).add(s6.from_int(b)), s8)
+        if lhs.to_int() != rhs.to_int():
+            bad += 1
+    print(f"  commuting square X(a)+X(b) = X(a+b): 2000 draws, {bad} failures")
+    ok &= bad == 0
+
+    # 7c. T-X-PROJ: projection is not reversible — exact collision witness.
+    hi = s8.from_int(5 * s8.m + 123)
+    lo = s8.from_int(1 * s8.m + 123)
+    p1, p2 = transduce(hi, s8, policy="project"), transduce(lo, s8, policy="project")
+    collide = (p1 == p2) and (hi != lo)
+    print(f"  T-X-PROJ witness: states with K=5 and K=1 collide under the "
+          f"project policy: {'yes — declared one-way confirmed' if collide else 'NO'}")
+    ok &= collide
+
+    # 7d. Winding Vanish (Policy I): as the basis grows past X, K -> 0.
+    x = 500_000_000
+    ladder = [s6, s8, StarFrame(basis=SAFE_BASIS_S8 + (23, 29), c=1)]
+    ks = [transduce(s6.from_int(x), f).k for f in ladder]
+    print(f"  winding vanish for X={x:,}: K over M=30030 / 9699690 / "
+          f"6469693230 = {ks[0]:,} / {ks[1]:,} / {ks[2]}")
+    ok &= ks[-1] == 0 and ks[0] > ks[1] > ks[2]
+
+    # 7e. Operator census — exact, with on-disk provenance.
+    c5, c8 = schema_census(5), schema_census(8)
+    print(f"  operator schemas: 8^5 = {c5:,} (Atlas, 5 lanes); "
+          f"8^8 = {c8:,} = 16^6 (S8, matches NINE65_v7 operator_space_R.py)")
+    print(f"  'over 14 million operators': satisfied by the 8-lane census "
+          f"({c8:,}); with the R operator, 9^8 = {schema_census(8, 9):,}")
+    ok &= c8 == 16**6 == 16_777_216 and c8 > 14_000_000
+
+    # 7f. Chimera formal properties (INV-2 governs; Atlas value table does not).
+    a, b = 100, 7
+    hom_ok = (parallel_summation_crt(apply_schema("AAAAA", a, b)) == (a + b) % 15015
+              and parallel_summation_crt(apply_schema("MMMMM", a, b)) == (a * b) % 15015
+              and parallel_summation_crt(apply_schema("SSSSS", a, b)) == (a - b) % 15015)
+    chi = apply_schema("AAMMM", a, b)
+    het_ok = matches_homogeneous(chi, a, b) == set()
+    print(f"  homogeneous schemas equal the ring homomorphism (INV-2): "
+          f"{'yes' if hom_ok else 'NO'}; heterogeneous AAMMM is a genuine "
+          f"chimera (matches no single op): {'yes' if het_ok else 'NO'}")
+    print(f"  NOTE: the Atlas named-schema value table (AAAAA(100,7)=5,447 etc.) "
+          f"contradicts the formal chimera definition and INV-2; recorded as "
+          f"unverified in docs/CLAIM_SCOPE.md")
+    deg = dkam_max_degree("AAMMM")
+    print(f"  DKAM: max polynomial degree of AAMMM = {deg} (< 3 = rho on the "
+          f"transport core); schemas with I lanes are rational maps outside "
+          f"polynomial DKAM ({8**5 - 7**5:,} of {8**5:,} on 5 lanes)")
+    ok &= hom_ok and het_ok and deg == 2
+    return ok
+
+
 def main() -> int:
     results = {
         "substrate identities": substrate_identities(),
@@ -373,6 +455,7 @@ def main() -> int:
         "toy-BFV battery": bfv_battery(),
         "trace uniformity": trace_probe(),
         "multiplier scaling": multiplier_audit(),
+        "fifth operator + census": fifth_operator_audit(),
     }
     banner("SUMMARY")
     for name, ok in results.items():

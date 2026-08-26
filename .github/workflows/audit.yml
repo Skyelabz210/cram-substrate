@@ -1,0 +1,34 @@
+name: CRAM arrow-harness audit
+
+# Runs the Python arrow-harness audit (8 gate-qualification sections, must
+# stay 8/8) and the pytest regression suite on every push/PR. No external
+# dependencies beyond pytest -- audit.py and the cram_fhe package use only
+# the Python standard library.
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cram-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pytest
+        run: pip install pytest
+      - name: Arrow-harness audit (8 sections, must be 8/8)
+        run: python3 -m cram_fhe.audit
+      - name: Regression suite
+        run: pytest tests/ -q

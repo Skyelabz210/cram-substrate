@@ -145,3 +145,27 @@ an oracle. Always pair the suite with an oracle check on the construct's actual 
 
 If a change to the suite alters any row above, the suite changed its mind about something
 canonical — investigate before accepting.
+
+---
+
+## G5 — owner clarification (2026-08-26, in-session; refactors the gloss above)
+
+G5 is **not** "no stored constants." It is a **derivability discipline**:
+
+- Every constant the hot path reads must be **re-derivable from the
+  construction**. Storing or caching a constant is legitimate when its
+  derivation is known — the cache is a performance choice, the derivation is
+  the requirement. (The suite implements exactly this: a constant with a
+  derivation callable PASSES; only `derivation=None` — merely stored, with
+  no known derivation — fails.)
+- The gate's real force applies where deriving a quantity is **believed hard
+  or unknown** — K, magnitude, inverses. There, G5 forbids giving up and
+  shipping an opaque stored value: it routes to the corpus tooling where
+  those quantities CAN be derived cheaply, at less overhead than standard
+  practice — star-family read-off (`t⁻¹ mod q = q − c`), adjacency
+  (`P⁻¹ ≡ P mod P+1`), K-Elimination for the winding, anchor ladders and
+  epochs for magnitude (lift inventory L5–L10).
+
+Read the "stored CRT constant" reference verdict above in this light: it is
+a violation because the value was stored **with no derivation**, not because
+it was stored.

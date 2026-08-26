@@ -237,6 +237,15 @@ citing them elsewhere.
   "impossible with i.i.d. sampling" — an anti-i.i.d. design. Claims from
   that path are not A2-clean under this repo's gates.
 
+## Scope of G5 (owner clarification, 2026-08-26)
+
+G5 is a derivability discipline, not a stored-constant ban: caching a
+constant is legitimate when its derivation from the construction is known;
+only opaque values with no known derivation fail. Where derivation is
+believed hard (K, magnitude, inverses), G5 routes to the tooling that
+derives them cheaply — star-family/adjacency read-offs, K-Elimination,
+ladders and epochs. Full statement: `docs/A2_GATES.md`, G5 addendum.
+
 ## Scope of A2 (restated to prevent drift)
 
 A2 is **no synthetic emissions**, not "no cross-lane traffic". K-Elimination

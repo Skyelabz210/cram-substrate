@@ -30,5 +30,11 @@ jobs:
         run: pip install pytest
       - name: Arrow-harness audit (8 sections, must be 8/8)
         run: python3 -m cram_fhe.audit
+      # `python3 -m pytest` (not bare `pytest`) is the invocation this repo
+      # documents, in tests/test_cram_fhe.py's own docstring. It also puts CWD
+      # on sys.path, which bare `pytest` does not -- that divergence is exactly
+      # what broke this workflow on its first run (ModuleNotFoundError:
+      # cram_fhe). pytest.ini now sets pythonpath so BOTH forms work; using the
+      # documented form here is the second layer.
       - name: Regression suite
-        run: pytest tests/ -q
+        run: python3 -m pytest tests/ -q

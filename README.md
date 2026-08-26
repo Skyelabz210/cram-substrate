@@ -31,7 +31,11 @@ and an operation-trace uniformity probe. The single one-way step, rescale by
 Δ, is declared and METERED: its `H_shadow = log₂Δ` is exactly the noise budget
 spent.
 
-**Claim discipline.** Read `docs/CLAIM_SCOPE.md` before quoting any result.
+**Claim discipline.** Read `docs/CLAIM_SCOPE.md` before quoting any result,
+and `docs/PROOF_SKETCHES.md` for the proof-sketch register — one entry per
+mathematical claim the code relies on, with status per the verification
+policy (machine-checked Lean/Coq artifact named, or proof sketch + audit
+witness).
 In particular: the audit establishes freedom from *algorithmic* emissions and
 a uniform op-trace, which is a *precondition* for constant-time
 implementation — it is **not** a physical side-channel elimination claim, and
